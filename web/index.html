@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>单点测试</title>
+<script src="/api/data/v1/realtime/jquery.js"></script>
+<script src="/api/data/v1/realtime/echarts.min.js"></script>
+<script src="/api/data/v1/realtime/player-pcm.js"></script> 
+<script src="/api/data/v1/realtime/recorder-core.js"></script>  
+<script src="/api/data/v1/realtime/extensions/wavesurfer.view.js"></script>
+<script type="text/javascript">                                                
+    var player;                                                                
+</script> 
+</head>
+<body style="margin: 0; padding: 0;">
+<div style="background-color:rgb(16,12,42);padding-top: 20px;box-sizing: border-box;height: 100%;overflow-y: auto;">
+<div id="log" style="color: rgb(2255,255,255);"></div>
+<div id="box">
+    <span class="btn_style" id="send">发送</span>
+    <input type="text" id="msg" size="12" autocomplete="off" placeholder="采集设备ID"/>
+    <p id="voiceBox" style="display: inline-block;margin: 0 auto;">
+        <span style="color: rgb(255,255,255);margin-right: 10px;">音量</span>
+        <input class="num_style" id="num" type="number" max=100 min=1 value=1 onchange="player.volume(this.value)"/>
+    </p>
+    <p id="wornBox" style="display: inline-block;margin: 0 auto;">
+        <span style="color: rgb(255,255,255);margin-right: 10px;">警戒值</span>
+        <input class="num_style" id="worn_num" type="number" max=100 min=-100 value=1 />
+    </p>
+    <span class="btn_style" id="update">更改</span>
+    <p id="choiseBox" style="display: inline-block;margin: 0 auto;">
+    <!-- <input checked ='checked' type="checkbox" id="fill" /> <label for="fill" style="color: rgb(2255,255,255);">数据补零</label> -->
+    <input checked ='checked' type="checkbox" id="audio" /> <label for="audio" style="color: rgb(2255,255,255);">音频数据</label>
+    <input checked ='checked' type="checkbox" id="audio_vatd" /> <label for="audio_vatd" style="color: rgb(2255,255,255);">音频强度波动</label>
+    <input checked ='checked' type="checkbox" id="vibrate_vatd" /> <label for="vibrate_vatd" style="color: rgb(2255,255,255);">振动强度波动</label>
+    <input checked ='checked' type="checkbox" id="temperature" /> <label for="temperature" style="color: rgb(2255,255,255);">温度数据</label></p>
+</div>
+<div style="border:1px solid #ccc; margin: 0 10%"><div id="surfer_view" style="width: 100%;height:200px;"></div></div>
+<div id="chartBox">
+    <div class="item" style="width:100%;height:450px" id="a_main"></div>
+    <div class="item" id="vx_main"></div>
+    <div class="item" id="vy_main"></div>
+    <div class="item" id="vz_main"></div>   
+    <div class="item" id="t_main"></div> 
+</div>
+<div id="sparkBox">
+    <div id="show_tips" class="tips">警告出现电火花</div>
+    <div class="item" id="spark_main"></div>
+</div>
+<div id="criticalTips">设置receiver的ENGINE_SPARK_ENABLE为true，设置设备采样率为32k</div>
+</div>
+</body>
+<script type="text/javascript">
+    $(function() {
+    var labelData = {
+        "ind_impulse":'脉冲指标',
+        "ind_kurt":"峭度指标",
+        "ind_margin":"裕度指标",
+        "ind_peak":"峰值指标",
+        "ind_waveform":"波形指标",
+        "kurt":"峭度",
+        "maxv":"最大值",
+        "mean":"均值",
+        "minv":"最小值",
+        "peak":"峰值",
+        "ppv":"峰峰值",
+        "raw":"原始采样值",
+        "rms":"均方根(强度)",
+        "db":"分贝",
+        "acc":"加速度",
+        "skew":"偏度",
+        "std":"标准差",
+        "varance":"方差",
+        "spark":"电火花值"
+    }
+    var collectorId = getUrlParam('id')
+    var type = getUrlParam('type')
+    var title = getUrlParam('title')
+    if(!title) title = '单点测试'
+    if(type) title = '电火花测试'
+    document.title = title
+    if(collectorId&&!type){
+        $("#box").hide()
+    }
+    if(type){
+        $("#chartBox").hide()
+        $("#choiseBox").hide()
+        $("#voiceBox").hide()
+        $("#msg").hide()
+        $("#send").hide()
+    }else{
+        $("#wornBox").hide()
+        $("#update").hide()
+        $("#sparkBox").hide()
+    }
+    var wornNum = 0 //计数
+    var tipsinterId = null //计时器id
+    var wornValue = 1
+    var criticalValueNum = 0 //持续为0计数
+    var conn;
+    var surfer;
+    var player_option = {                                                      
+        encoding: "16bitInt",                                                
+        channels: 1,                                                         
+        sampleRate: 32000,                                                   
+        flushingTime: 1000                                                   
+    };  
+    var param = {                                                            
+        interval: 100,                                                       
+        temperature: collectorId?true:$('#temperature').is(':checked'),
+        vibrate_vatd: collectorId?true:$('#vibrate_vatd').is(':checked'),
+        audio: collectorId?true:$('#audio').is(':checked'),
+        audio_vatd: collectorId?true:$('#audio_vatd').is(':checked'),
+        audio_spark: true,
+        // fill:collectorId?true:$('#fill').is(':checked'),
+        fill: false,
+    }
+    var log = $("#log");
+    function appendLog(msg) {
+        var d = log[0]
+        var doScroll = d.scrollTop == d.scrollHeight - d.clientHeight;
+        msg.appendTo(log)
+        if (doScroll) {
+            d.scrollTop = d.scrollHeight - d.clientHeight;
+        }
+    }
+    //获取url中的参数
+    function getUrlParam(name){
+        var reg = new RegExp("(^|&)" + name + "=([^&]*)(&|$)", "i");
+            var r = window.location.search.substr(1).match(reg);
+            if (r != null)
+            return decodeURIComponent(r[2]);
+            return null;
+    }
+
+    window.onbeforeunload = function(){
+        if(conn){
+            conn.close()
+            conn = null
+        }
+    }
+    function webSocketSend(){
+        var msg = $("#msg");
+        if (!conn) {
+            return false;
+        }
+        if (!collectorId && !msg.val()) {
+            return false;
+        }
+        if(type){
+            param.collectorids =collectorId?collectorId: msg.val();                                        
+            param.temperature =false;
+            param.vibrate_vatd =false;
+            param.audio =false;
+            param.audio_vatd =false;
+            param.audio_spark =true;
+            param.fill =false;
+        }else{
+            param.collectorids =collectorId?collectorId: msg.val();                                        
+            param.temperature =collectorId?true: $('#temperature').is(':checked');
+            param.vibrate_vatd =collectorId?true: $('#vibrate_vatd').is(':checked');
+            param.audio = collectorId?true:$('#audio').is(':checked');
+            param.audio_vatd =collectorId?true: $('#audio_vatd').is(':checked');
+            param.audio_spark =false;
+            // param.fill =collectorId?true: $('#fill').is(':checked');            
+            param.fill =false;
+        }
+        conn.send(JSON.stringify(param));  
+        return false        
+    }
+
+
+    $("#send").click(webSocketSend);
+    $("#update").click(function(){
+        wornValue = $("#worn_num").val()
+    })
+    if (window["WebSocket"]) {
+        conn = new WebSocket("ws:"+location.host+"/api/data/v1/realtime/ws/collector");
+
+        //创建实例                                                             
+        player = new PCMPlayer(player_option);
+
+        // 创建音频波形图
+        surfer = Recorder.WaveSurferView({
+            elem:"#surfer_view",
+            scale: 2,
+            fps: 50,
+            position: 0,
+            centerHeight: 1,
+            linear: [
+                0,
+                "rgba(0,187,17,1)",
+                0.7,
+                "rgba(255,215,0,1)",
+                1,
+                "rgba(255,102,0,1)"
+            ],
+            direction: -1,
+            centerColor: "",
+            duration: 10000
+        });
+
+        conn.onclose = function(evt) {
+            // 断开重连
+            if (player) {
+                player.destroy();
+            }
+            conn = new WebSocket("ws:"+location.host+"/api/data/v1/realtime/ws/collector");
+            // appendLog($("<div><b>Connection closed.</b></div>"));
+            if(conn){
+                webSocketSend()
+            }
+        }
+
+        conn.onopen = function(evt) {
+            if(collectorId){
+                webSocketSend()
+            }
+        }
+
+        conn.onmessage = function(evt) {
+            if (evt.data instanceof Blob) {
+                var reader = new FileReader();                                   
+                reader.readAsArrayBuffer(evt.data);                              
+                reader.onload = function (e) {                                   
+                    var buf = new Uint8Array(reader.result);                       
+                    if (player) {
+                        player.feed(buf);                                              
+                    }
+
+                    var pcm = new Int16Array(reader.result);
+                    surfer.input(pcm, 0, player_option.sampleRate);
+                }
+                return;                                                          
+            }      
+
+            var res =  JSON.parse(evt.data);
+
+            if (res.audio){
+                if (res.audio.samplerate == player_option.sampleRate) {          
+                    return;                                                        
+                }
+                player_option.sampleRate = res.audio.samplerate;
+                if (player) {
+                    player.destroy();
+                    player = null;
+                }
+                // appendLog($("<div/>").text(JSON.stringify(player_option)))
+                player = new PCMPlayer(player_option);                           
+                return; 
+            }
+
+            if (param.audio_vatd) {   
+                let data = res.audio_engine.data[0]
+                if(a_option.series.length == 0){
+                    let legendData = [], seriesData = [], num = 0, firstValue = ''
+                    let itemObj = {
+                        name: '',
+                        type: 'line',
+                        showSymbol: false,
+                        hoverAnimation: false,
+                        data: []                   
+                    }
+                    for(var key in data){
+                        if(key != 'time'){
+                            let item = JSON.parse(JSON.stringify(itemObj))
+                            item.name = labelData[key]
+                            item.key = key
+                            item.data.push(...init_data(data.time))
+                            legendData.push(labelData[key])
+                            seriesData.push(item)
+                        }
+                    }
+                    a_option.series = seriesData
+                    firstValue = legendData[0]
+                    num = legendData.indexOf("分贝")
+                    legendData[0] = "分贝"
+                    legendData[num] = firstValue
+                    a_option.legend.data = legendData
+                    a_option.legend.show = legendData.length == 1?false:true
+                }
+                a_option.series.map((item)=>{
+                    item.data.shift()
+                    item.data.push({value:[data.time,data[item.key].toFixed(2)]})
+                })
+            }
+
+			if (param.audio_spark && type) {
+				if (a_data.length == 0) {
+                    a_data.push(...init_data(res.audio_engine.data[0].time))
+				}
+				for (i = 0; i < res.audio_engine.data.length; i++) {
+					a_data.shift()
+					spark = 0
+					if (res.audio_engine.data[i].spark) {
+						spark = res.audio_engine.data[i].spark
+					}
+					a_data.push({
+						value: [res.audio_engine.data[i].time, spark]
+					})
+					if(spark > wornValue){
+						wornNum++
+					}else{
+						wornNum = 0
+					}
+                    if(spark == 0){
+                        criticalValueNum++
+                    }else{  
+                        criticalValueNum = 0
+                    }
+                    if(criticalValueNum == 10){
+                        $("#criticalTips").slideDown()
+                        criticalValueNum = 0
+                        setTimeout(()=>{
+                            $("#criticalTips").slideUp()
+                        },1500)
+                    }
+					if(wornNum == 5){
+						$("#show_tips").show()
+						wornNum = 0
+						if(!tipsinterId){
+							tipsinterId = setInterval(()=>{
+								$("#show_tips").toggle()
+							},600)
+						}
+						setTimeout(()=>{
+							if(tipsinterId){
+								clearInterval(tipsinterId)
+								$("#show_tips").hide()
+								tipsinterId = null
+							}
+						},2400)
+					}
+				}
+			}
+
+            if (param.vibrate_vatd) {
+				if (vx_data.length == 0) {
+                    vx_data.push(...init_data(res.vibrate_engine.data[0].time))
+                    vy_data.push(...init_data(res.vibrate_engine.data[0].time))
+                    vz_data.push(...init_data(res.vibrate_engine.data[0].time))
+				}
+                vx_data.shift()
+                vx_data.push({
+                    value: [res.vibrate_engine.data[0].time, res.vibrate_engine.data[0].acc]
+                })
+                vy_data.shift()
+                vy_data.push({
+                    value: [res.vibrate_engine.data[1].time, res.vibrate_engine.data[1].acc]
+                })
+                vz_data.shift()
+                vz_data.push({
+                    value: [res.vibrate_engine.data[2].time, res.vibrate_engine.data[2].acc]
+                })
+            }
+
+			// 温度波动图数据实时
+            if (param.temperature) {
+				if (t_data.length == 0) {
+                    t_data.push(...init_data(res.temperature.data[0].time))
+				}
+                t_data.shift()
+                t_data.push({
+                    value: [res.temperature.data[0].time, res.temperature.data[0].t]
+                })
+            }
+        }
+    } else {
+        appendLog($("<div><b>Your browser does not support WebSockets.</b></div>"))
+    }
+
+
+    // 基于准备好的dom，初始化echarts实例
+    if(type){
+        var a_Chart = echarts.init(document.getElementById('spark_main'));
+    }else{
+        var a_Chart = echarts.init(document.getElementById('a_main'));
+    }
+    var vx_Chart = echarts.init(document.getElementById('vx_main'));
+    var vy_Chart = echarts.init(document.getElementById('vy_main'));
+    var vz_Chart = echarts.init(document.getElementById('vz_main'));
+    var t_Chart = echarts.init(document.getElementById('t_main'));
+
+    var a_data = [];
+    var vx_data = [];
+    var vy_data = [];
+    var vz_data = [];
+    var t_data = [];
+
+    function init_data(date){
+        let data = []
+        millisecond = date;
+        millisecond -= millisecond%100
+        millisecond -= 2400*100
+        for (var i = 0; i < 2400; i++) {
+            now = new Date(millisecond)
+            data.push({
+                value: [now.valueOf(), 0]
+            })
+            millisecond += 100
+        }
+        return data
+    }
+
+    a_option = {
+        backgroundColor: 'rgb(16,12,42)',
+        title: {
+            text: type?'电火花似然指标':'数据图',
+            textStyle: {                                                       
+                color: 'rgb(255,255,255)',                                   
+            },
+        },
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                animation: false
+            }
+        },
+        legend: {
+            data: [],
+            selectedMode:'single',
+            textStyle: {
+                color: '#F5DEB3',
+                fontSize:'14'
+            },
+            padding:[0,40]
+            // type: 'scroll',
+            // top: 25,
+            // bottom: 20,
+            // animation: false,
+            // pageTextStyle: {
+            //     color: '#F5DEB3'
+            // }
+        },
+        grid: {
+            left: type?'5%':'2.5%',
+            right: type?'5%':'2.5%',
+            containLabel: false
+        },
+        xAxis: {
+            type: 'time',
+            splitLine: {
+                show: false
+            },
+            axisLabel: {                                                          
+                formatter: function(params, index){                                 
+                    var now = new Date(params);                                      
+                    var y = now.getFullYear();                                                                                                                                 
+                    var m = now.getMonth()+1;                                        
+                    var d = now.getDay();                                            
+                    var h = now.getHours();                                          
+                    var mm = now.getMinutes()<10?'0'+now.getMinutes():now.getMinutes();                                       
+                    var s = now.getSeconds()<10?'0'+now.getSeconds():now.getSeconds();                                        
+                    var ms = now.getMilliseconds();                                  
+                    var str = h+":"+mm+":"+s+"."+ms;                                  
+                    return str.substr(0, 10);
+                }                                                                   
+            },
+            axisLine: {                                                          
+                show: true,    // 是否显示坐标轴轴线                            
+                symbol: ['none', 'arrow'],     // 轴线两端箭头，两个值，none表示没有箭头，arrow表示有箭头
+                symbolSize: [10, 15],     // 轴线两端箭头大小，数值一表示宽度，数值二表示高度
+                lineStyle: {                                                    
+                    color: 'rgb(255,255,255)',    // 坐标轴线线的颜色           
+                    width: '1',    // 坐标轴线线宽                              
+                    type: 'solid',     // 坐标轴线线的类型（'solid'，实线类型；'dashed'，虚线类型；'dotted',点状类型）
+                }                                                               
+            },
+            boundaryGap: true,
+        },
+        yAxis: {
+            type: 'value',
+            boundaryGap: [0, '100%'],
+            axisLine: {                                                          
+                show: true,    // 是否显示坐标轴轴线                            
+                symbol: ['none', 'arrow'],     // 轴线两端箭头，两个值，none表示没有箭头，arrow表示有箭头
+                symbolSize: [10, 15],     // 轴线两端箭头大小，数值一表示宽度，数值二表示高度
+                lineStyle: {                                                    
+                    color: 'rgb(255,255,255)',    // 坐标轴线线的颜色           
+                    width: '1',    // 坐标轴线线宽                              
+                    type: 'solid',     // 坐标轴线线的类型（'solid'，实线类型；'dashed'，虚线类型；'dotted',点状类型）
+                }                                                               
+            },
+            splitLine: {
+                show: true,
+            }
+        },
+        series: type?[{
+            name: '电火花似然指标',
+            type: 'line',
+            showSymbol: false,
+            hoverAnimation: false,
+            data: a_data
+        }]:[]
+    };
+
+
+    vx_option = {
+        backgroundColor: 'rgb(16,12,42)',
+        title: {
+            text: '振动X轴',
+            textStyle: {                                                       
+                color: 'rgb(255,255,255)',                                   
+            },
+        },
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                animation: false
+            }
+        },
+        grid: {
+            left: '5%',
+            right: '5%',
+            containLabel: false
+        },
+        xAxis: {
+            type: 'time',
+            splitLine: {
+                show: false
+            },
+            axisLabel: {                                                          
+                formatter: function(params, index){                                 
+                    var now = new Date(params);                                      
+                    var y = now.getFullYear();                                                                                                                                 
+                    var m = now.getMonth()+1;                                        
+                    var d = now.getDay();                                            
+                    var h = now.getHours();                                          
+                    var mm = now.getMinutes()<10?'0'+now.getMinutes():now.getMinutes();                                       
+                    var s = now.getSeconds()<10?'0'+now.getSeconds():now.getSeconds();                                        
+                    var ms = now.getMilliseconds();                                  
+                    var str = h+":"+mm+":"+s+"."+ms;                                  
+                    return str.substr(0, 10);
+                }                                                                   
+            },
+            axisLine: {                                                          
+                show: true,    // 是否显示坐标轴轴线                            
+                symbol: ['none', 'arrow'],     // 轴线两端箭头，两个值，none表示没有箭头，arrow表示有箭头
+                symbolSize: [10, 15],     // 轴线两端箭头大小，数值一表示宽度，数值二表示高度
+                lineStyle: {                                                    
+                    color: 'rgb(255,255,255)',    // 坐标轴线线的颜色           
+                    width: '1',    // 坐标轴线线宽                              
+                    type: 'solid',     // 坐标轴线线的类型（'solid'，实线类型；'dashed'，虚线类型；'dotted',点状类型）
+                }                                                               
+            },
+            boundaryGap: true,
+        },
+        yAxis: {
+            type: 'value',
+            boundaryGap: [0, '100%'],
+            axisLine: {                                                          
+                show: true,    // 是否显示坐标轴轴线                            
+                symbol: ['none', 'arrow'],     // 轴线两端箭头，两个值，none表示没有箭头，arrow表示有箭头
+                symbolSize: [10, 15],     // 轴线两端箭头大小，数值一表示宽度，数值二表示高度
+                lineStyle: {                                                    
+                    color: 'rgb(255,255,255)',    // 坐标轴线线的颜色           
+                    width: '1',    // 坐标轴线线宽                              
+                    type: 'solid',     // 坐标轴线线的类型（'solid'，实线类型；'dashed'，虚线类型；'dotted',点状类型）
+                }                                                               
+            },
+            splitLine: {
+                show: true,
+            }
+        },
+        series: [{
+            name: '模拟数据',
+            type: 'line',
+            showSymbol: false,
+            hoverAnimation: false,
+            data: vx_data
+        }]
+    };
+
+    vy_option = {
+        backgroundColor: 'rgb(16,12,42)',
+        title: {
+            text: '振动Y轴',
+            textStyle: {                                                       
+                color: 'rgb(255,255,255)',                                   
+            },
+        },
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                animation: false
+            }
+        },
+        grid: {
+            left: '5%',
+            right: '5%',
+            containLabel: false
+        },
+        xAxis: {
+            type: 'time',
+            splitLine: {
+                show: false
+            },
+            axisLabel: {                                                          
+                formatter: function(params, index){                                 
+                    var now = new Date(params);                                      
+                    var y = now.getFullYear();                                                                                                                                 
+                    var m = now.getMonth()+1;                                        
+                    var d = now.getDay();                                            
+                    var h = now.getHours();                                          
+                    var mm = now.getMinutes()<10?'0'+now.getMinutes():now.getMinutes();                                       
+                    var s = now.getSeconds()<10?'0'+now.getSeconds():now.getSeconds();                                        
+                    var ms = now.getMilliseconds();                                  
+                    var str = h+":"+mm+":"+s+"."+ms;                                  
+                    return str.substr(0, 10);
+                }                                                                   
+            },
+            axisLine: {                                                          
+                show: true,    // 是否显示坐标轴轴线                            
+                symbol: ['none', 'arrow'],     // 轴线两端箭头，两个值，none表示没有箭头，arrow表示有箭头
+                symbolSize: [10, 15],     // 轴线两端箭头大小，数值一表示宽度，数值二表示高度
+                lineStyle: {                                                    
+                    color: 'rgb(255,255,255)',    // 坐标轴线线的颜色           
+                    width: '1',    // 坐标轴线线宽                              
+                    type: 'solid',     // 坐标轴线线的类型（'solid'，实线类型；'dashed'，虚线类型；'dotted',点状类型）
+                }                                                               
+            },
+            boundaryGap: true,
+        },
+        yAxis: {
+            type: 'value',
+            boundaryGap: [0, '100%'],
+            axisLine: {                                                          
+                show: true,    // 是否显示坐标轴轴线                            
+                symbol: ['none', 'arrow'],     // 轴线两端箭头，两个值，none表示没有箭头，arrow表示有箭头
+                symbolSize: [10, 15],     // 轴线两端箭头大小，数值一表示宽度，数值二表示高度
+                lineStyle: {                                                    
+                    color: 'rgb(255,255,255)',    // 坐标轴线线的颜色           
+                    width: '1',    // 坐标轴线线宽                              
+                    type: 'solid',     // 坐标轴线线的类型（'solid'，实线类型；'dashed'，虚线类型；'dotted',点状类型）
+                }                                                               
+            },
+            splitLine: {
+                show: true,
+            }
+        },
+        series: [{
+            name: '模拟数据',
+            type: 'line',
+            showSymbol: false,
+            hoverAnimation: false,
+            data: vy_data
+        }]
+    };
+
+    vz_option = {
+        backgroundColor: 'rgb(16,12,42)',
+        title: {
+            text: '振动Z轴',
+            textStyle: {                                                       
+                color: 'rgb(255,255,255)',                                   
+            },
+        },
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                animation: false
+            }
+        },
+        grid: {
+            left: '5%',
+            right: '5%',
+            containLabel: false
+        },
+        xAxis: {
+            type: 'time',
+            splitLine: {
+                show: false
+            },
+            axisLabel: {                                                          
+                formatter: function(params, index){                                 
+                    var now = new Date(params);                                      
+                    var y = now.getFullYear();                                                                                                                                 
+                    var m = now.getMonth()+1;                                        
+                    var d = now.getDay();                                            
+                    var h = now.getHours();                                          
+                    var mm = now.getMinutes()<10?'0'+now.getMinutes():now.getMinutes();                                       
+                    var s = now.getSeconds()<10?'0'+now.getSeconds():now.getSeconds();                                        
+                    var ms = now.getMilliseconds();                                  
+                    var str = h+":"+mm+":"+s+"."+ms;                                  
+                    return str.substr(0, 10);
+                }                                                                   
+            },
+            axisLine: {                                                          
+                show: true,    // 是否显示坐标轴轴线                            
+                symbol: ['none', 'arrow'],     // 轴线两端箭头，两个值，none表示没有箭头，arrow表示有箭头
+                symbolSize: [10, 15],     // 轴线两端箭头大小，数值一表示宽度，数值二表示高度
+                lineStyle: {                                                    
+                    color: 'rgb(255,255,255)',    // 坐标轴线线的颜色           
+                    width: '1',    // 坐标轴线线宽                              
+                    type: 'solid',     // 坐标轴线线的类型（'solid'，实线类型；'dashed'，虚线类型；'dotted',点状类型）
+                }                                                               
+            },
+            boundaryGap: true,
+        },
+        yAxis: {
+            type: 'value',
+            boundaryGap: [0, '100%'],
+            axisLine: {                                                          
+                show: true,    // 是否显示坐标轴轴线                            
+                symbol: ['none', 'arrow'],     // 轴线两端箭头，两个值，none表示没有箭头，arrow表示有箭头
+                symbolSize: [10, 15],     // 轴线两端箭头大小，数值一表示宽度，数值二表示高度
+                lineStyle: {                                                    
+                    color: 'rgb(255,255,255)',    // 坐标轴线线的颜色           
+                    width: '1',    // 坐标轴线线宽                              
+                    type: 'solid',     // 坐标轴线线的类型（'solid'，实线类型；'dashed'，虚线类型；'dotted',点状类型）
+                }                                                               
+            },
+            splitLine: {
+                show: true,
+            }
+        },
+        series: [{
+            name: '模拟数据',
+            type: 'line',
+            showSymbol: false,
+            hoverAnimation: false,
+            data: vz_data
+        }]
+    };
+
+    t_option = {
+        backgroundColor: 'rgb(16,12,42)',
+        title: {
+            text: '温度',
+            textStyle: {                                                       
+                color: 'rgb(255,255,255)',                                   
+            },
+        },
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                animation: false
+            }
+        },
+        grid: {
+            left: '5%',
+            right: '5%',
+            containLabel: false
+        },
+        xAxis: {
+            type: 'time',
+            splitLine: {
+                show: false
+            },
+            axisLabel: {                                                          
+                formatter: function(params, index){                                 
+                    var now = new Date(params);                                      
+                    var h = now.getHours();
+                    var mm = now.getMinutes()<10?'0'+now.getMinutes():now.getMinutes();                                       
+                    var s = now.getSeconds()<10?'0'+now.getSeconds():now.getSeconds();
+                    var ms = now.getMilliseconds();
+                    var str = h+":"+mm+":"+s+"."+ms;                                  
+                    return str.substr(0, 10);
+                }                                                                   
+            },         
+            axisLine: {                                                          
+                show: true,    // 是否显示坐标轴轴线                            
+                symbol: ['none', 'arrow'],     // 轴线两端箭头，两个值，none表示没有箭头，arrow表示有箭头
+                symbolSize: [10, 15],     // 轴线两端箭头大小，数值一表示宽度，数值二表示高度
+                lineStyle: {                                                    
+                    color: 'rgb(255,255,255)',    // 坐标轴线线的颜色           
+                    width: '1',    // 坐标轴线线宽                              
+                    type: 'solid',     // 坐标轴线线的类型（'solid'，实线类型；'dashed'，虚线类型；'dotted',点状类型）
+                }                                                               
+            },
+            boundaryGap: true,
+        },
+        yAxis: {
+            type: 'value',
+            boundaryGap: [0, '100%'],
+            axisLine: {                                                          
+                show: true,    // 是否显示坐标轴轴线                            
+                symbol: ['none', 'arrow'],     // 轴线两端箭头，两个值，none表示没有箭头，arrow表示有箭头
+                symbolSize: [10, 15],     // 轴线两端箭头大小，数值一表示宽度，数值二表示高度
+                lineStyle: {                                                    
+                    color: 'rgb(255,255,255)',    // 坐标轴线线的颜色           
+                    width: '1',    // 坐标轴线线宽                              
+                    type: 'solid',     // 坐标轴线线的类型（'solid'，实线类型；'dashed'，虚线类型；'dotted',点状类型）
+                }                                                               
+            },
+            splitLine: {
+                show: true,
+            }
+        },
+        series: [{
+            name: '模拟数据',
+            type: 'line',
+            showSymbol: false,
+            hoverAnimation: false,
+            data: t_data
+        }]
+    };
+
+    setInterval(function () {
+        a_Chart.setOption(a_option);
+        vx_Chart.setOption(vx_option);
+        vy_Chart.setOption(vy_option);
+        vz_Chart.setOption(vz_option);
+        t_Chart.setOption(t_option);
+    }, 500);
+});
+
+</script>
+<style>
+    #box{
+        width: 100%;
+        padding-left: 10px;
+        height: 50px;
+        vertical-align: middle;
+        margin-bottom: 20px;
+        box-sizing: border-box;
+    }
+    .btn_style{
+        display: inline-block;
+        width: 70px;
+        height: 32px;
+        line-height: 32px;
+        text-align: center;
+        color: #fff;
+        background: blue;
+        border-radius: 3px;
+        font-size: 13px;
+        cursor: pointer;
+        vertical-align: middle;
+        margin-right: 10px;
+    }
+    input{
+        outline: none;
+        vertical-align: middle;
+    }
+    #msg{
+        height: 32px;
+        line-height: 32px;
+        border: none;
+        padding: 5px 5px;
+        background: #fff;
+        border-radius: 3px;
+        margin-right: 10px;
+    }
+    .num_style{
+        width: 50px;
+        height: 32px;
+        line-height: 32px;
+        border: none;
+        padding: 5px 5px;
+        padding-right: 0px;
+        background: #fff;
+        border-radius: 3px;
+        margin-right: 10px; 
+    }
+    .num_style{
+        width: 50px;
+        height: 32px;
+        line-height: 32px;
+        border: none;
+        padding: 5px 5px;
+        padding-right: 0px;
+        background: #fff;
+        border-radius: 3px;
+        margin-right: 10px; 
+    }
+    label{
+        cursor: pointer;
+        vertical-align: middle;
+    }
+    #chartBox{
+        display: flex;
+        flex-wrap: wrap;
+    }
+    #chartBox .item{
+        width: 50%;
+        height: 300px;
+    }
+    #spark_main{
+        width: 100%;
+        height: 500px;
+    }
+    .tips{
+        position: absolute;
+        height: 80px;
+        transition: all 2s;
+        display: none;
+        z-index: 9999;
+        text-align: center;
+        width: 90%;
+        left: 50%;
+        transform: translateX(-50%);
+        line-height: 80px;
+        font-size: 30px;
+        color: #FFF;
+        top: 150px;
+        background: rgba(216, 12, 36);
+    }
+    .tips span{
+        display: inline-block;
+        width: 40px;
+        height: 40px;
+        margin-right: 10px;
+        background: url(./worn.png);
+        background-size: 100% 100%;
+        vertical-align: middle;
+    }
+    #criticalTips{
+        width: 350px;
+        height: 50px;
+        padding-top: 5px;
+        line-height: 20px;
+        display: none;
+        font-size: 14px;
+        box-sizing: border-box;
+        text-align: center;
+        border-radius: 5px;
+        background: #fff;
+        position: fixed;
+        top: 50px;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+</style>
+</html>
