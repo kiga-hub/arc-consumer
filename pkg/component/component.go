@@ -15,13 +15,9 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/kiga-hub/arc-consumer/pkg/api"
-	"github.com/kiga-hub/arc-consumer/pkg/file"
-	"github.com/kiga-hub/arc-consumer/pkg/gnet"
 	"github.com/kiga-hub/arc-consumer/pkg/goss"
 	"github.com/kiga-hub/arc-consumer/pkg/grpc"
-	"github.com/kiga-hub/arc-consumer/pkg/httpproxy"
-	"github.com/kiga-hub/arc-consumer/pkg/proxy"
-	"github.com/kiga-hub/arc-consumer/pkg/ws"
+	"github.com/kiga-hub/arc-consumer/pkg/simulate"
 )
 
 // ArcConsumerElementKey is Element Key for arc-consumer
@@ -36,8 +32,7 @@ type ArcConsumerComponent struct {
 	logger        logging.ILogger
 	nacosClient   *configuration.NacosClient
 	gossipKVCache *microComponent.GossipKVCacheComponent
-	ws            ws.Handler
-	gnet          gnet.Handler
+	simulate      simulate.Handler
 	grpc          grpc.Handler
 	api           api.Handler
 	kvCache       goss.Handler
@@ -50,12 +45,8 @@ func (c *ArcConsumerComponent) Name() string {
 
 // PreInit called before Init()
 func (c *ArcConsumerComponent) PreInit(ctx context.Context) error {
-	file.SetDefaultConfig()
-	gnet.SetDefaultConfig()
+	simulate.SetDefaultConfig()
 	grpc.SetDefaultConfig()
-	proxy.SetDefaultConfig()
-	httpproxy.SetDefaultConfig()
-	ws.SetDefaultConfig()
 	return nil
 }
 
@@ -90,22 +81,14 @@ func (c *ArcConsumerComponent) Init(server *micro.Server) (err error) {
 		)
 	}
 
-	// 初始化websocket服务
-	if c.ws, err = ws.New(
-		ws.WithLogger(c.logger),
-	); err != nil {
-		return err
-	}
-
 	// 初始化grpck客户端服务，目前用于转发数据到rawdb
 	c.grpc = grpc.New(grpc.WithLogger(c.logger))
 
 	// 初始化tcp服务
-	if c.gnet, err = gnet.New(
-		gnet.WithLogger(c.logger),
-		gnet.WithGrpc(c.grpc),
-		gnet.WithWebSocket(c.ws),
-		gnet.WithKVCache(c.kvCache),
+	if c.simulate, err = simulate.New(
+		simulate.WithLogger(c.logger),
+		simulate.WithGrpc(c.grpc),
+		simulate.WithKVCache(c.kvCache),
 	); err != nil {
 		return err
 	}
@@ -113,9 +96,8 @@ func (c *ArcConsumerComponent) Init(server *micro.Server) (err error) {
 	// 初始化web api接口服务
 	c.api = api.New(
 		api.WithLogger(c.logger),
-		api.WithWebSocket(c.ws),
 		api.WithGossipKVCache(c.gossipKVCache),
-		api.WithGnet(c.gnet),
+		api.WithSimulate(c.simulate),
 	)
 
 	return nil
@@ -130,8 +112,7 @@ func (c *ArcConsumerComponent) SetDynamicConfig(nf *platformConf.NodeConfig) err
 	// 开启接收服务
 	if nf.DataTransfer.EnableReceive {
 		if nf.DataTransfer.ReceiveConfig != nil {
-			viper.Set(gnet.KeyEnableCalculateTimestamp, nf.DataTransfer.ReceiveConfig.EnableCalculateTimestamp) // 时间对齐配置
-			viper.Set(gnet.KeyEnableCRCCheck, nf.DataTransfer.ReceiveConfig.EnableCRCCheck)                     // crc 校验配置
+			viper.Set(simulate.KeyEnableCRCCheck, nf.DataTransfer.ReceiveConfig.EnableCRCCheck) // crc 校验配置
 		}
 	}
 
@@ -142,15 +123,6 @@ func (c *ArcConsumerComponent) SetDynamicConfig(nf *platformConf.NodeConfig) err
 		viper.Set(grpc.KeyGRPCEnable, false)
 	}
 
-	// 开启转发服务
-	if nf.DataTransfer.EnableSend {
-		viper.Set(proxy.KeyProxyEnable, true)
-		if nf.DataTransfer.SendConfig != nil && nf.DataTransfer.SendConfig.RemoteReceiverAddr != "" {
-			viper.Set(proxy.KeyProxyParent, nf.DataTransfer.SendConfig.RemoteReceiverAddr) // 远端服务地址
-		}
-	} else {
-		viper.Set(proxy.KeyProxyEnable, false)
-	}
 	return nil
 }
 
@@ -173,14 +145,9 @@ func (c *ArcConsumerComponent) Start(ctx context.Context) error {
 		go c.kvCache.Start(ctx)
 	}
 
-	// websocket模块启动
-	if c.ws != nil {
-		go c.ws.Start(ctx)
-	}
-
 	// 数据接收模块启动
 	go func() {
-		if err := c.gnet.Start(ctx); err != nil {
+		if err := c.simulate.Start(ctx); err != nil {
 			panic(err)
 		}
 	}()
@@ -203,8 +170,8 @@ func (c *ArcConsumerComponent) Start(ctx context.Context) error {
 // Stop the component
 func (c *ArcConsumerComponent) Stop(ctx context.Context) error {
 	// 停止数据接收模块
-	if err := c.gnet.Stop(); err != nil {
-		c.logger.Errorw("stop gnet", "err", err)
+	if err := c.simulate.Stop(); err != nil {
+		c.logger.Errorw("stop simulate", "err", err)
 	}
 
 	// 停止grpc服务

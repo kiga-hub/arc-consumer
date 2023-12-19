@@ -20,16 +20,3 @@ go build -ldflags " \
 	-X 'main.GoVersion=${GO_VERSION}'       \
 	" -o $2 .
 
-cd client
-
-go build -ldflags " \
-	-X 'main.AppName=${APP_NAME}-client' 			\
-	-X 'main.AppVersion=${APP_VERSION}'     \
-	-X 'main.BuildVersion=${BUILD_VERSION//\'/_}' \
-	-X 'main.BuildTime=${BUILD_TIME}'       \
-	-X 'main.GitRevision=${GIT_REVISION}'   \
-	-X 'main.GitBranch=${GIT_BRANCH}'       \
-	-X 'main.GoVersion=${GO_VERSION}'       \
-	" -o $2-client .
-
-cd ..

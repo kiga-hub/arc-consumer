@@ -1,8 +1,7 @@
 package api
 
 import (
-	"github.com/kiga-hub/arc-consumer/pkg/gnet"
-	"github.com/kiga-hub/arc-consumer/pkg/ws"
+	"github.com/kiga-hub/arc-consumer/pkg/simulate"
 	"github.com/kiga-hub/arc/logging"
 	microComponent "github.com/kiga-hub/arc/micro/component"
 )
@@ -21,17 +20,10 @@ func loadOptions(options ...Option) *Server {
 	return opts
 }
 
-// WithWebSocket -
-func WithWebSocket(w ws.Handler) Option {
+// WithSimulate -
+func WithSimulate(s simulate.Handler) Option {
 	return func(opts *Server) {
-		opts.ws = w
-	}
-}
-
-// WithGnet -
-func WithGnet(g gnet.Handler) Option {
-	return func(opts *Server) {
-		opts.gnet = g
+		opts.simulate = s
 	}
 }
 

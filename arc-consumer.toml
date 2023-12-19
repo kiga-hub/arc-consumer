@@ -1,9 +1,9 @@
 [basic]
-apiport = 80
-apiroot = "/api/data/v1/realtime"
+apiport = 8082
+apiroot = "/api/data/v1/consumer"
 devmode = false
 dynamicconfig = false
-inswarm = true
+inswarm = false
 isapibody = false
 isapirate = false
 isapitimeout = false
@@ -27,46 +27,9 @@ goroutine_count = 8
 host = "127.0.0.1"
 keepalive = 60000
 net_type = "tcp"
-notice_enable = false
-offset_threshold = 10000
 port = 8972
 proxy_timealign = true
-resend_enable = false
-
-[ws]
-enable = true
-fill = 10
-fill_enable = true
 
 [grpc]
-enable = false
-server = "localhost:8080"
-
-[file]
-a_enable = false
-dirent = "./data"
-duration_min = 1
-mv_enable = false
-n_enable = false
-subdirent = "day"
-t_enable = false
-timeout = 10000
-v_enable = false
-
-[engine]
-spark_enable = false
-spark_model = "./mod/spark/spark_gmm_mod_v01.bin"
-vatd_enable = true
-
-[proxy]
-enable = false
-interval = 1000
-net_type = "tcp"
-parent = "127.0.0.1:8972"
-timeout = 1000
-
-[httpproxy]
-enable = false
-parent = "localhost/api/data/v1/realtime"
-size = 1024000
-timeout = 100
+enable = true
+server = "localhost:8081"

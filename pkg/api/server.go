@@ -1,8 +1,7 @@
 package api
 
 import (
-	"github.com/kiga-hub/arc-consumer/pkg/gnet"
-	"github.com/kiga-hub/arc-consumer/pkg/ws"
+	"github.com/kiga-hub/arc-consumer/pkg/simulate"
 	"github.com/kiga-hub/arc/logging"
 	microComponent "github.com/kiga-hub/arc/micro/component"
 	"github.com/kiga-hub/arc/micro/conf"
@@ -17,8 +16,7 @@ type Handler interface {
 // Server - api处理器
 type Server struct {
 	logger          logging.ILogger
-	ws              ws.Handler
-	gnet            gnet.Handler
+	simulate        simulate.Handler
 	gossipKVCache   *microComponent.GossipKVCacheComponent
 	selfServiceName string
 }

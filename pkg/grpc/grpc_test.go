@@ -183,12 +183,12 @@ func clientDataSend() {
 
 func getFrame(seq int64) []byte {
 	// 1. 准备数据段
-	audio := make([]byte, 2048)
+	data := make([]byte, 2048)
 	for i := 0; i < 2048; i++ {
-		audio[i] = byte(i)
+		data[i] = byte(i)
 	}
 	sa := protocols.NewDefaultSegmentArc()
-	sa.Data = append(sa.Data, audio...)
+	sa.Data = append(sa.Data, data...)
 	if err := sa.Validate(); err != nil {
 		fmt.Println(err)
 	}

@@ -73,7 +73,6 @@ type Server struct {
 	mask      uint64
 	logger    logging.ILogger
 	config    *Config
-	metrics   *Metrics
 	running   *atomic.Bool
 	closeChan chan struct{}
 }
@@ -89,7 +88,6 @@ func New(opts ...Option) Handler {
 	}
 
 	srv.pools = new(sync.Map)
-	srv.metrics = NewMetrics()
 	srv.running = atomic.NewBool(false)
 	srv.closeChan = make(chan struct{})
 
@@ -156,7 +154,6 @@ func (s *Server) Start(ctx context.Context) {
 				s.logger.Infow("grpc replay", "mask", key, "addr", s.config.Server)
 				return true
 			})
-			s.metrics.connections.Set(float64(connections))
 		}
 	}
 }
@@ -264,8 +261,6 @@ func (s *Server) Write(id uint64, sid string, value []byte) (err error) {
 			return fmt.Errorf("send %v", err)
 		}
 	}
-
-	s.metrics.packets.WithLabelValues(sid).Inc()
 
 	return nil
 }

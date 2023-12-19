@@ -1,6 +1,10 @@
-package file
+package simulate
 
 import (
+	"sync"
+
+	"github.com/kiga-hub/arc-consumer/pkg/goss"
+	"github.com/kiga-hub/arc-consumer/pkg/grpc"
 	"github.com/kiga-hub/arc/logging"
 )
 
@@ -8,7 +12,10 @@ import (
 type Option func(opts *Server)
 
 func loadOptions(options ...Option) *Server {
-	opts := &Server{}
+	opts := &Server{
+		frameChans: new(sync.Map),
+		sensors:    new(sync.Map),
+	}
 	for _, option := range options {
 		option(opts)
 	}
@@ -19,6 +26,20 @@ func loadOptions(options ...Option) *Server {
 		opts.config = GetConfig()
 	}
 	return opts
+}
+
+// WithGrpc -
+func WithGrpc(g grpc.Handler) Option {
+	return func(opts *Server) {
+		opts.grpc = g
+	}
+}
+
+// WithKVCache -
+func WithKVCache(g goss.Handler) Option {
+	return func(opts *Server) {
+		opts.kvCache = g
+	}
 }
 
 // WithLogger -
