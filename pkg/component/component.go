@@ -81,7 +81,7 @@ func (c *ArcConsumerComponent) Init(server *micro.Server) (err error) {
 		)
 	}
 
-	// 初始化grpck客户端服务，目前用于转发数据到rawdb
+	// 初始化grpck客户端服务，目前用于转发数据到arc-storage
 	c.grpc = grpc.New(grpc.WithLogger(c.logger))
 
 	// 初始化tcp服务
@@ -118,7 +118,7 @@ func (c *ArcConsumerComponent) SetDynamicConfig(nf *platformConf.NodeConfig) err
 
 	// 开启数据管理服务
 	if nf.DataTransfer.EnableReadWrite {
-		viper.Set(grpc.KeyGRPCEnable, true) // grpc 将数据发送给rawdb
+		viper.Set(grpc.KeyGRPCEnable, true) // grpc 将数据发送给arc-storage
 	} else {
 		viper.Set(grpc.KeyGRPCEnable, false)
 	}
